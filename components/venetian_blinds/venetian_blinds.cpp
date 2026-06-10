@@ -1,11 +1,13 @@
 #include "venetian_blinds.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
+#include <cmath>
 
 namespace esphome {
 namespace venetian_blinds {
 
 static const char *TAG = "venetian_blinds.cover";
+static constexpr float FLOAT_COMPARE_EPSILON = 0.0001f;
 
 using namespace esphome::cover;
 
@@ -59,7 +61,7 @@ void VenetianBlinds::control(const CoverCall &call) {
   }
   if (call.get_position().has_value()) {
     auto requested_position = *call.get_position();
-    if ((requested_position != this->position) ||
+    if ((std::fabs(requested_position - this->position) > FLOAT_COMPARE_EPSILON) ||
         (requested_position == 0 && this->tilt > 0)) {
       cover::CoverOperation operation;
       uint32_t operation_duration;
@@ -71,20 +73,20 @@ void VenetianBlinds::control(const CoverCall &call) {
       } else {
         operation = COVER_OPERATION_OPENING;
         operation_duration = this->open_net_duration_;
-        this->target_tilt_ = 1.0f;
+        this->target_tilt_ = this->tilt_duration;
       }
 
-      this->target_position_ = requested_position * operation_duration;
+      this->target_position_ = lroundf(requested_position * operation_duration);
       this->start_direction_(operation);
     }
   }
   if (call.get_tilt().has_value()) {
     auto requested_tilt = *call.get_tilt();
-    if (requested_tilt != this->tilt) {
+    if (std::fabs(requested_tilt - this->tilt) > FLOAT_COMPARE_EPSILON) {
       auto operation = requested_tilt < this->tilt ? COVER_OPERATION_CLOSING
                                                    : COVER_OPERATION_OPENING;
       this->target_position_ = this->exact_position_;
-      this->target_tilt_ = requested_tilt * this->tilt_duration;
+      this->target_tilt_ = lroundf(requested_tilt * this->tilt_duration);
       this->start_direction_(operation);
     }
   }
@@ -133,10 +135,10 @@ bool VenetianBlinds::is_at_target_() const {
 }
 
 void VenetianBlinds::start_direction_(CoverOperation dir) {
+  this->recompute_position_();
   if (dir == this->current_operation && dir != COVER_OPERATION_IDLE)
     return;
 
-  this->recompute_position_();
   Trigger<> *trig;
   switch (dir) {
   case COVER_OPERATION_IDLE:
